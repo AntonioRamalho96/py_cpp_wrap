@@ -54,7 +54,7 @@ To compile and run the tests run the following commands on the *test* directory 
 
 ## Some actual documentation
 
-This section shows briefly the methods of the main class. For documentation about all methods a doxygen documentation can be found [here](./html_doc/index.html).
+This section shows briefly the methods of the main class. For documentation about all methods a doxygen documentation can be found [here](https://htmlpreview.github.io/?https://github.com/AntonioRamalho96/py_cpp_wrap/blob/main/html_doc/classPyCppWrap.html).
 
 Here are the methods of the **PyCppWrap** class:
 

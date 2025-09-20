@@ -13,7 +13,7 @@ int main()
     assert(barney.call<std::string>("introduce_myself") == "Hello, my name is Barney and I am 30 years old");
 
     // The method "set_age" takes a single argument (new age) and does not return anything
-    barney.call("set_age", 35);
+    barney.call_v("set_age", 35);
 
     // If we want to return some other type, like int, we simply pass it to the template type
     assert(barney.call<int>("get_age") == 35);

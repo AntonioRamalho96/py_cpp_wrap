@@ -24,18 +24,15 @@ int main()
     PyCppWrap my_instance("/path/to/person_class.py", "PersonClass", "John", 30); // Instantiate the class
     my_instance.call<std::string>("greet", "Mr."); // Returns std::string{"Mr. John"}
     my_instance.call<int>("get_age"); // Returns 30
-    my_instance.call("increment_age"); // Does not return anything
+    my_instance.call_v("increment_age"); // Does not return anything
 }
 ```
 
 
 ## Compiling
 To compile your code for using this class you just need to: 
- - **include the header "py_cpp_wrap.py"** - all the other hpp files in the repo must be in the same folder
- - **Determine where "Python.h" is** - to do so you must find two first numbers of the version (e.g. 3.8) and
- tell the compiler to look for headers in the respective python directory (e.g. passing -I /usr/include/python3.8)
- - **Link "libpythonX.X.so" is** - to do so you must find two first numbers of the version (e.g. 3.8) and
- tell the compiler to link the appropriate library (e.g. passing -l python3.8)
+ - **include the header "py_cpp_wrap.hpp"** - feel free to copy to your repo, it is MIT license
+ - **Link "libpythonX.X.so"** - where X.X corresponds to the python version you want to link
 
 
 Some nice examples of usage and how to compile the code can be found in the *test* folder
@@ -77,7 +74,7 @@ Calls a function which returns something
 ___________________________________________________________________________
 
 ```cpp
-    void call(const std::string &method_name, Args... args);
+    void call_v(const std::string &method_name, Args... args);
 ```
 Calls a method discarding the return, if existing
  - **method_name** - name of the method to call

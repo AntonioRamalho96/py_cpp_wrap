@@ -24,7 +24,7 @@ int main()
     PyCppWrap my_instance("/path/to/person_class.py", "PersonClass", "John", 30); // Instantiate the class
     my_instance.call<std::string>("greet", "Mr."); // Returns std::string{"Mr. John"}
     my_instance.call<int>("get_age"); // Returns 30
-    my_instance.call_v("increment_age"); // Does not return anything
+    my_instance.call("increment_age"); // Does not return anything
 }
 ```
 
@@ -74,7 +74,7 @@ Calls a function which returns something
 ___________________________________________________________________________
 
 ```cpp
-    void call_v(const std::string &method_name, Args... args);
+    void call(const std::string &method_name, Args... args);
 ```
 Calls a method discarding the return, if existing
  - **method_name** - name of the method to call

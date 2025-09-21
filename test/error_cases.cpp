@@ -67,14 +67,14 @@ void ErrorInConstructor()
 void NonExistingMethod()
 {
     PyCppWrap my_class(Paths::simple_class, "SimpleClass", 3);
-    ASSERT_EXCEPTION_THROWN(my_class.call_v("bad_method_name"), PyCppWrapNonExistingMethod);
+    ASSERT_EXCEPTION_THROWN(my_class.call("bad_method_name"), PyCppWrapNonExistingMethod);
     std::cout << "Here" << std::endl;
     ASSERT_EXCEPTION_THROWN(my_class.call<int>("bad_method_name"), PyCppWrapNonExistingMethod);
 }
 void ErrorInMethod()
 {
     PyCppWrap my_class(Paths::classes_with_errors, "ErrorMethod");
-    ASSERT_EXCEPTION_THROWN(my_class.call_v("method"), PyCppWrapErrorInMethod);
+    ASSERT_EXCEPTION_THROWN(my_class.call("method"), PyCppWrapErrorInMethod);
 }
 void BadArgumentNumber()
 {

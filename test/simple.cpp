@@ -6,7 +6,7 @@ int main()
     PyCppWrap my_class(std::string(__DIR__) + "/py_files/simple_class.py", "SimpleClass", 4);
     int result =  my_class.call<int>("add", 5);
     assert(result == 9);
-    my_class.call_v("add_no_return", 1);
+    my_class.call("add_no_return", 1);
     result = my_class.call<int>("add", 5);
     assert(result == 15);
 

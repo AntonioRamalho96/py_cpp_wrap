@@ -28,6 +28,7 @@ SOFTWARE.
 #include <iostream>
 #include <string>
 #include <Python.h>
+#include <type_traits>
 
 // Py Cpp wrap exceptions
 class PyCppWrapBadFile : public std::runtime_error
@@ -105,18 +106,8 @@ public:
      * @param args arguments to pass to that method (from the allowed types, up to 5 arguments)
      * @return T valued returned by the python method, converted to C++
      */
-    template<typename T, typename... Args>
+    template<typename T = void, typename... Args>
     T call(const std::string &method_name, Args... args);
-
-    /**
-     * @brief Calls a method discarding the return, if existing
-     * 
-     * @tparam Args argument types might be int, std::string or double
-     * @param method_name name of the method to call
-     * @param args arguments to pass to the method (from the allowed types, up to 5 arguments)
-     */
-    template<typename... Args>
-    void call_v(const std::string &method_name, Args... args);
 
     /**
      * @brief Returns a pointer to the python instance
@@ -347,27 +338,20 @@ PyCppWrap::PyCppWrap(const std::string &entry_point_script, const std::string &c
 }
 
 
-template<typename T, typename... Args>
+template<typename T , typename... Args>
 T PyCppWrap::call(const std::string &method_name, Args... args)
 {
-    PyObject * method = PyCppWrapUtils::GetMethod(this->pThis, method_name.c_str(), class_name, file_path);
-    PyObject * pArgs = PyCppWrapArgPack::PythonArgs(args...);
-    PyObject * result = PyObject_CallObject(method, pArgs);
-    PyCppWrapUtils::ValidateResult(result, class_name, file_path, method_name);
-    T result_cpp = PyCppWrapConvPy2Cpp::python2Cpp<T>(result, class_name, file_path, method_name);
-    Py_DECREF(pArgs);
-    return result_cpp;
-}
-
-
-template<typename... Args>
-void PyCppWrap::call_v(const std::string &method_name, Args... args)
-{
+    
     PyObject * method = PyCppWrapUtils::GetMethod(this->pThis, method_name.c_str(), class_name, file_path);
     PyObject * pArgs = PyCppWrapArgPack::PythonArgs(args...);
     PyObject * result = PyObject_CallObject(method, pArgs);
     PyCppWrapUtils::ValidateResult(result, class_name, file_path, method_name);
     Py_DECREF(pArgs);
+    if constexpr (!std::is_void_v<T>)
+    {
+        T result_cpp = PyCppWrapConvPy2Cpp::python2Cpp<T>(result, class_name, file_path, method_name);
+        return result_cpp;
+    }
 }
 
 PyObject* PyCppWrap::get() const{

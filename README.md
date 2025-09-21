@@ -33,6 +33,7 @@ int main()
 To compile your code for using this class you just need to: 
  - **include the header "py_cpp_wrap.hpp"** - feel free to copy to your repo, it is MIT license
  - **Link "libpythonX.X.so"** - where X.X corresponds to the python version you want to link
+ - **use std=c++17 or higher** - the template resolution uses *if constexpr* which is only available from C++17 onwards
 
 
 Some nice examples of usage and how to compile the code can be found in the *test* folder

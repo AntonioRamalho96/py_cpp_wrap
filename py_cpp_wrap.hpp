@@ -24,22 +24,32 @@ SOFTWARE.
 
 #pragma once
 
+#include <Python.h>
 #include <map>
 #include <iostream>
 #include <string>
-#include <Python.h>
 #include <type_traits>
 
 // Py Cpp wrap exceptions
-class PyCppWrapBadFile : public std::runtime_error
+class PyCppWrapException : public std::exception
 {
 public:
-    PyCppWrapBadFile(const std::string &file_path);
+    explicit PyCppWrapException(std::string message) : m_message(std::move(message)) {}
+    const char* what() const noexcept override { return m_message.c_str(); }
+
+protected:
+    std::string m_message;
+};
+
+class PyCppWrapBadFile : public PyCppWrapException
+{
+public:
+    explicit PyCppWrapBadFile(const std::string &file_path);
 private:
     static std::string make_msg(const std::string &file_path);
 };
 
-class PyCppWrapNonExistingClass : public std::runtime_error
+class PyCppWrapNonExistingClass : public PyCppWrapException
 {
 public:
     PyCppWrapNonExistingClass(const std::string &class_name, const std::string &file_path);
@@ -47,7 +57,7 @@ private:
     static std::string make_msg(const std::string &class_name, const std::string &file_path);
 };
 
-class PyCppWrapErrorInConstructor : public std::runtime_error
+class PyCppWrapErrorInConstructor : public PyCppWrapException
 {
 public:
     PyCppWrapErrorInConstructor(const std::string &class_name, const std::string &file_path);
@@ -56,7 +66,7 @@ private:
 };
 
 
-class PyCppWrapNonExistingMethod : public std::runtime_error
+class PyCppWrapNonExistingMethod : public PyCppWrapException
 {
 public:
     PyCppWrapNonExistingMethod(const std::string &class_name, const std::string &file_path, const std::string &method_name);
@@ -64,7 +74,7 @@ private:
     static std::string make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name);
 };
 
-class PyCppWrapErrorInMethod : public std::runtime_error
+class PyCppWrapErrorInMethod : public PyCppWrapException
 {
 public:
     PyCppWrapErrorInMethod(const std::string &class_name, const std::string &file_path, const std::string &method_name);
@@ -73,7 +83,7 @@ private:
 };
 
 
-class PyCppWrapBadReturnType : public std::runtime_error
+class PyCppWrapBadReturnType : public PyCppWrapException
 {
 public:
     PyCppWrapBadReturnType(const std::string &class_name, const std::string &file_path, const std::string &method_name, const std::string &expected_return_type, const std::string &actual_return_type);
@@ -82,9 +92,11 @@ private:
 };
 
 
+
+
 class PyCppWrap
 {
-public: 
+public:
     /**
      * @brief Construct a new Py Cpp Wrap object
      * 
@@ -116,6 +128,20 @@ public:
      */
     PyObject* get() const;
 
+    /**
+     * @brief This class acquires the python GIL when constructed, 
+     *        and releases it when destructed.
+     * 
+    */
+    class PythonLock
+    {
+    public:
+        PythonLock() : gstate{PyGILState_Ensure()} {   }
+        ~PythonLock() { PyGILState_Release(gstate); }
+    private:
+        PyGILState_STATE gstate;
+    };
+
 
 private:
     // Actual instance of the python object
@@ -123,9 +149,7 @@ private:
     // These two parameters are only stored for being used in error messages
     std::string class_name;
     std::string file_path;
-    
-    // Module manager
-    class  PyCppWrapModuleManager
+    class PyCppWrapModuleManager
     {
     public:
         PyCppWrapModuleManager();
@@ -133,9 +157,12 @@ private:
         PyObject * GetModule(const std::string & path);
     private:
         std::map<std::string, PyObject*> python_modules;
+        bool m_initialized_by_this_manager{false};
+        PyThreadState *m_thread_state{nullptr};
     };
 
-    static PyCppWrapModuleManager g_module_manager;
+
+    inline static PyCppWrapModuleManager g_module_manager;
 
     // Cpp to python conversion
     struct PyCppWrapConvCpp2Py
@@ -317,18 +344,13 @@ private:
 };
 };
 
-// Instantiate module manager
-PyCppWrap::PyCppWrapModuleManager PyCppWrap::g_module_manager = {};
-
-
-
-
 /// Py Cpp Wrap Implementation
 template<typename ...Args>
-PyCppWrap::PyCppWrap(const std::string &entry_point_script, const std::string &class_name, Args... args) :
+inline PyCppWrap::PyCppWrap(const std::string &entry_point_script, const std::string &class_name, Args... args) :
     class_name{class_name},
     file_path{entry_point_script}
 {
+    PythonLock lock{};
     PyObject *pModule = g_module_manager.GetModule(entry_point_script);
     PyObject *pConstructor = PyCppWrapUtils::GetConstructor(pModule, class_name, entry_point_script);
     PyObject *pArgs=PyCppWrapArgPack::PythonArgs(args...);
@@ -339,9 +361,9 @@ PyCppWrap::PyCppWrap(const std::string &entry_point_script, const std::string &c
 
 
 template<typename T , typename... Args>
-T PyCppWrap::call(const std::string &method_name, Args... args)
+inline T PyCppWrap::call(const std::string &method_name, Args... args)
 {
-    
+    PythonLock lock{};
     PyObject * method = PyCppWrapUtils::GetMethod(this->pThis, method_name.c_str(), class_name, file_path);
     PyObject * pArgs = PyCppWrapArgPack::PythonArgs(args...);
     PyObject * result = PyObject_CallObject(method, pArgs);
@@ -354,18 +376,19 @@ T PyCppWrap::call(const std::string &method_name, Args... args)
     }
 }
 
-PyObject* PyCppWrap::get() const{
+inline PyObject* PyCppWrap::get() const{
     return this->pThis;
 }
 
-PyCppWrap::~PyCppWrap()
+inline PyCppWrap::~PyCppWrap()
 {
+    PythonLock lock{};
     Py_DECREF(pThis);
 }
 
 // implement conversions from C++ to python
 template<>
-std::string PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<std::string>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
+inline std::string PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<std::string>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
 {
     if(!PyUnicode_Check(pObj))
         throw PyCppWrapBadReturnType(class_name, file_path, method_name, "str", pObj->ob_type->tp_name);
@@ -373,7 +396,7 @@ std::string PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<std::string>(PyObject * p
 }
 
 template<>
-int PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<int>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
+inline int PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<int>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
 {
     if(!PyLong_Check(pObj))
         throw PyCppWrapBadReturnType(class_name, file_path, method_name, "int", pObj->ob_type->tp_name);
@@ -381,7 +404,7 @@ int PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<int>(PyObject * pObj, const std::
 }
 
 template<>
-double PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<double>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
+inline double PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<double>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
 {
     if(!PyFloat_Check(pObj))
         throw PyCppWrapBadReturnType(class_name, file_path, method_name, "float", pObj->ob_type->tp_name);
@@ -389,67 +412,82 @@ double PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<double>(PyObject * pObj, const
 }
 
 template<>
-PyObject * PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<PyObject *>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
+inline PyObject * PyCppWrap::PyCppWrapConvPy2Cpp::python2Cpp<PyObject *>(PyObject * pObj, const std::string &class_name, const std::string &file_path, const std::string &method_name)
 {
     return pObj;
 }
 
 // Definitions of conversions from C++ to python
-char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(double &)
+inline char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(double &)
 {
     return 'd';
 }
-double PyCppWrap::PyCppWrapConvCpp2Py::GetValue(double &d)
+inline double PyCppWrap::PyCppWrapConvCpp2Py::GetValue(double &d)
 {
     return d;
 }
-char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(PyObject *)
+inline char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(PyObject *)
 {
     return 'O';
 }
-PyObject *PyCppWrap::PyCppWrapConvCpp2Py::GetValue(PyObject *obj)
+inline PyObject *PyCppWrap::PyCppWrapConvCpp2Py::GetValue(PyObject *obj)
 {
     return obj;
 }
-char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(int &)
+inline char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(int &)
 {
     return 'i';
 }
-int PyCppWrap::PyCppWrapConvCpp2Py::GetValue(int &d)
+inline int PyCppWrap::PyCppWrapConvCpp2Py::GetValue(int &d)
 {
     return d;
 }
-char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(std::string &)
+inline char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(std::string &)
 {
     return 'z';
 }
-char *PyCppWrap::PyCppWrapConvCpp2Py::GetValue(std::string &str)
+inline char *PyCppWrap::PyCppWrapConvCpp2Py::GetValue(std::string &str)
 {
     return str.data();
 }
-char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(const char *)
+inline char PyCppWrap::PyCppWrapConvCpp2Py::GetLetter(const char *)
 {
     return 'z';
 }
-const char *PyCppWrap::PyCppWrapConvCpp2Py::GetValue(const char *str)
+inline const char *PyCppWrap::PyCppWrapConvCpp2Py::GetValue(const char *str)
 {
     return str;
 }
 
 // Defintion of module manager
-PyCppWrap::PyCppWrapModuleManager::PyCppWrapModuleManager()
+inline PyCppWrap::PyCppWrapModuleManager::PyCppWrapModuleManager()
 {
-    Py_Initialize();
+    if (!Py_IsInitialized())
+    {
+        Py_Initialize();
+        m_initialized_by_this_manager = true;
+    }
+    if (Py_IsInitialized())
+    {
+        m_thread_state = PyEval_SaveThread();
+    }
 }
 
-PyCppWrap::PyCppWrapModuleManager::~PyCppWrapModuleManager()
+inline PyCppWrap::PyCppWrapModuleManager::~PyCppWrapModuleManager()
 {
     for(const auto &entry : python_modules)
         Py_DECREF(entry.second);
-    Py_Finalize();
+    if (m_thread_state != nullptr)
+    {
+        PyEval_RestoreThread(m_thread_state);
+    }
+    if (m_initialized_by_this_manager)
+    {
+        Py_Finalize();
+    }
 }
 
-PyObject * PyCppWrap::PyCppWrapModuleManager::GetModule(const std::string & path)
+inline PyObject * PyCppWrap::PyCppWrapModuleManager::GetModule(const std::string & path)
 {
     PyCppWrapUtils::ScriptPath separated_path{path};
     if(python_modules.count(separated_path.filename_no_extension) == 0)
@@ -473,13 +511,13 @@ PyObject * PyCppWrap::PyCppWrapModuleManager::GetModule(const std::string & path
 
 
 // Define python argument packer
-PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs()
+inline PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs()
 {
     return Py_BuildValue("()");
 }
 
 template <typename T1>
-PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1)
+inline PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1)
 {
     std::string formater = "(";
     formater += PyCppWrapConvCpp2Py::GetLetter(arg1);
@@ -489,7 +527,7 @@ PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1)
 }
     
 template <typename T1, typename T2>
-PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2)
+inline PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2)
 {
     std::string formater = "(";
     formater += PyCppWrapConvCpp2Py::GetLetter(arg1);
@@ -502,7 +540,7 @@ PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2)
 }
     
 template <typename T1, typename T2, typename T3>
-PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3)
+inline PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3)
 {
     std::string formater = "(";
     formater += PyCppWrapConvCpp2Py::GetLetter(arg1);
@@ -518,7 +556,7 @@ PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3)
 }
 
 template <typename T1, typename T2, typename T3, typename T4>
-PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3, T4 arg4)
+inline PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3, T4 arg4)
 {
     std::string formater = "(";
     formater += PyCppWrapConvCpp2Py::GetLetter(arg1);
@@ -537,7 +575,7 @@ PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3, T4 
 }
 
 template <typename T1, typename T2, typename T3, typename T4, typename T5>
-PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5)
+inline PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5)
 {
     std::string formater = "(";
     formater += PyCppWrapConvCpp2Py::GetLetter(arg1);
@@ -561,43 +599,43 @@ PyObject *PyCppWrap::PyCppWrapArgPack::PythonArgs(T1 arg1, T2 arg2, T3 arg3, T4 
 
 // Py Cpp wrap exceptions implementation
 // Bad file
-PyCppWrapBadFile::PyCppWrapBadFile(const std::string &file_path) : std::runtime_error(make_msg(file_path).c_str()) {}
-std::string PyCppWrapBadFile::make_msg(const std::string &file_path)
+inline PyCppWrapBadFile::PyCppWrapBadFile(const std::string &file_path) : PyCppWrapException(make_msg(file_path)) {}
+inline std::string PyCppWrapBadFile::make_msg(const std::string &file_path)
 {
     return std::string("Can't import file \"") + file_path + "\"";
 }
 
 // non existing class
-PyCppWrapNonExistingClass::PyCppWrapNonExistingClass(const std::string &class_name, const std::string &file_path) : std::runtime_error(make_msg(class_name, file_path).c_str()) {}
-std::string PyCppWrapNonExistingClass::make_msg(const std::string &class_name, const std::string &file_path)
+inline PyCppWrapNonExistingClass::PyCppWrapNonExistingClass(const std::string &class_name, const std::string &file_path) : PyCppWrapException(make_msg(class_name, file_path)) {}
+inline std::string PyCppWrapNonExistingClass::make_msg(const std::string &class_name, const std::string &file_path)
 {
     return std::string("No such constructor \"") + class_name + "\" in file \"" + file_path + "\"";
 }
 
 // Error in contructor
-PyCppWrapErrorInConstructor::PyCppWrapErrorInConstructor(const std::string &class_name, const std::string &file_path) : std::runtime_error(make_msg(class_name, file_path).c_str()) {}
-std::string PyCppWrapErrorInConstructor::make_msg(const std::string &class_name, const std::string &file_path)
+inline PyCppWrapErrorInConstructor::PyCppWrapErrorInConstructor(const std::string &class_name, const std::string &file_path) : PyCppWrapException(make_msg(class_name, file_path)) {}
+inline std::string PyCppWrapErrorInConstructor::make_msg(const std::string &class_name, const std::string &file_path)
 {
     return std::string("Error calling constructor \"") + class_name + "\" in file \"" + file_path + "\"";
 }
 
 // Non existing method
-PyCppWrapNonExistingMethod::PyCppWrapNonExistingMethod(const std::string &class_name, const std::string &file_path, const std::string &method_name) : std::runtime_error(make_msg(class_name, file_path, method_name).c_str()) {}
-std::string PyCppWrapNonExistingMethod::make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name)
+inline PyCppWrapNonExistingMethod::PyCppWrapNonExistingMethod(const std::string &class_name, const std::string &file_path, const std::string &method_name) : PyCppWrapException(make_msg(class_name, file_path, method_name)) {}
+inline std::string PyCppWrapNonExistingMethod::make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name)
 {
     return std::string("No such method \"") + method_name + "\" in class \"" + class_name + "\" in file \"" + file_path + "\"";
 }
 
 // Error in method
-PyCppWrapErrorInMethod::PyCppWrapErrorInMethod(const std::string &class_name, const std::string &file_path, const std::string &method_name) : std::runtime_error(make_msg(class_name, file_path, method_name).c_str()) {}
-std::string PyCppWrapErrorInMethod::make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name)
+inline PyCppWrapErrorInMethod::PyCppWrapErrorInMethod(const std::string &class_name, const std::string &file_path, const std::string &method_name) : PyCppWrapException(make_msg(class_name, file_path, method_name)) {}
+inline std::string PyCppWrapErrorInMethod::make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name)
 {
     return std::string("Error in method \"") + method_name + "\" in class \"" + class_name + "\" in file \"" + file_path + "\"";
 }
 
 // Bad return type
-PyCppWrapBadReturnType::PyCppWrapBadReturnType(const std::string &class_name, const std::string &file_path, const std::string &method_name, const std::string &expected_return_type, const std::string &actual_return_type) : std::runtime_error(make_msg(class_name, file_path, method_name, expected_return_type, actual_return_type).c_str()) {}
-std::string PyCppWrapBadReturnType::make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name, const std::string &expected_return_type, const std::string &actual_return_type)
+inline PyCppWrapBadReturnType::PyCppWrapBadReturnType(const std::string &class_name, const std::string &file_path, const std::string &method_name, const std::string &expected_return_type, const std::string &actual_return_type) : PyCppWrapException(make_msg(class_name, file_path, method_name, expected_return_type, actual_return_type)) {}
+inline std::string PyCppWrapBadReturnType::make_msg(const std::string &class_name, const std::string &file_path, const std::string &method_name, const std::string &expected_return_type, const std::string &actual_return_type)
 {
     return std::string("Error in method \"") + method_name + "\" in class \"" + class_name + "\" in file \"" + file_path +
         ". Expcting return type to be \"" + expected_return_type + "\" but was \"" + actual_return_type;

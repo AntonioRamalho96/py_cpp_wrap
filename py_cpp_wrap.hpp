@@ -466,9 +466,6 @@ inline PyCppWrap::PyCppWrapModuleManager::PyCppWrapModuleManager()
     {
         Py_Initialize();
         m_initialized_by_this_manager = true;
-    }
-    if (Py_IsInitialized())
-    {
         m_thread_state = PyEval_SaveThread();
     }
 }
@@ -480,9 +477,6 @@ inline PyCppWrap::PyCppWrapModuleManager::~PyCppWrapModuleManager()
     if (m_thread_state != nullptr)
     {
         PyEval_RestoreThread(m_thread_state);
-    }
-    if (m_initialized_by_this_manager)
-    {
         Py_Finalize();
     }
 }
